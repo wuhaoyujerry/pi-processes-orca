@@ -1,0 +1,5 @@
+# Transitive dependencies of the Pi type package. Their build scripts are not
+# needed to typecheck or test this extension.
+allowBuilds:
+  protobufjs: false
+  "@google/genai": false
