@@ -3,6 +3,7 @@ import type {
   EventBus,
   ExtensionAPI,
 } from "@earendil-works/pi-coding-agent";
+import { sessionLivenessRegistry } from "./session-liveness";
 import { OrcaStatusReporter } from "./status-reporter";
 
 // The public event protocol of @aliou/pi-processes (its docs/events.md).
@@ -41,24 +42,40 @@ function lastAssistantText(messages: AgentEndEvent["messages"]): string {
 }
 
 export default function processesOrcaExtension(pi: ExtensionAPI): void {
-  // Orca sets this for every terminal it runs. Other terminals do not
-  // understand the report, so write it nowhere else.
-  if (!process.env.ORCA_TERMINAL_HANDLE) return;
+  // Orca sets ORCA_TERMINAL_HANDLE for every terminal it runs, and
+  // ORCA_STRUCTURED_SESSION for its native chat, which removes the handle.
+  const inTerminal = Boolean(process.env.ORCA_TERMINAL_HANDLE);
+  const inChat = Boolean(process.env.ORCA_STRUCTURED_SESSION);
+  if (!inTerminal && !inChat) return;
 
   let reporter: OrcaStatusReporter | null = null;
   let unsubscribe: (() => void) | null = null;
+  let releaseLiveness: (() => void) | null = null;
 
   const stop = (): void => {
     unsubscribe?.();
     unsubscribe = null;
     reporter?.dispose();
     reporter = null;
+    releaseLiveness?.();
+    releaseLiveness = null;
   };
 
   pi.on("session_start", (_event, ctx) => {
     stop();
+    // Native chat stops an idle Pi after a while, which kills its processes.
+    // It asks this registry first, so a live process keeps the session.
+    if (inChat) {
+      releaseLiveness = sessionLivenessRegistry().register({
+        name: "pi-processes-orca",
+        sessionId: ctx.sessionManager.getSessionId(),
+        // An in-memory session has no file; an empty name fails validation.
+        sessionFile: ctx.sessionManager.getSessionFile() || undefined,
+        isActive: () => countLiveProcesses(pi.events) > 0,
+      });
+    }
     // In RPC and JSON modes stdout is a protocol stream, not a terminal.
-    if (ctx.mode !== "tui") return;
+    if (!inTerminal || ctx.mode !== "tui") return;
 
     const current = new OrcaStatusReporter({
       countLive: () => countLiveProcesses(pi.events),

@@ -8,11 +8,14 @@ When a Pi turn ends but a background process still runs, the Orca terminal
 pane shows **Monitoring**, not finished. The pane returns to finished when the
 last process ends.
 
+In Orca's native chat, a live process keeps Orca from stopping the idle chat,
+which would also stop the process.
+
 It contains only this adapter. It does not include or replace pi-processes.
 
 ## Requirements
 
-- Pi 1.4.0 or later, run in an Orca terminal pane
+- Pi 1.4.0 or later, run in an Orca terminal pane or Orca native chat
 - `@aliou/pi-processes` installed in Pi
 
 Without pi-processes, or outside Orca, the extension does nothing.
@@ -65,11 +68,22 @@ Each report carries the turn's prompt and last reply text. Orca replaces the
 whole status row with each report, so without them the pane would lose that
 text.
 
+### Native chat
+
+Orca stops a native chat's Pi after it has been idle for a while (30 minutes
+by default). pi-processes then kills its processes. Before it stops Pi, Orca
+asks the shared `@agegr/pi-web/session-liveness/v1` registry whether the
+session still has work. This extension registers there and answers active
+while a process is alive, so Orca keeps the chat running.
+
 ## Limits
 
 - The report format is Orca's internal one. A later Orca release can change it.
-- Terminal panes only. Orca's native chat runs Pi in RPC mode, where stdout is
-  a protocol stream, so nothing is written there.
+- Native chat shows no Monitoring state. Orca's native chat runs Pi in RPC
+  mode, where stdout is a protocol stream, and gives extensions no channel to
+  set that state.
+- In native chat, a process that never ends keeps the chat running until you
+  stop the process or close the chat.
 - The pane shows the Monitoring state only. It lists no process names.
 - While Pi is idle, a repeat can overwrite a status that Orca's hooks set in
   the meantime, such as an open dialog or a running pi-subagents agent.

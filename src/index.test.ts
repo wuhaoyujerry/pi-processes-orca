@@ -5,6 +5,7 @@ import {
 } from "@earendil-works/pi-coding-agent";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import extension from "./index";
+import { sessionLivenessRegistry } from "./session-liveness";
 import { SETTLE_DELAY_MS } from "./status-reporter";
 
 type Handler = (event: object, ctx: ExtensionContext) => unknown;
@@ -22,6 +23,10 @@ function setup(options: { mode?: ExtensionContext["mode"] } = {}) {
   const ctx = {
     mode: options.mode ?? "tui",
     isIdle: () => false,
+    sessionManager: {
+      getSessionId: () => "session_1",
+      getSessionFile: () => undefined,
+    },
   } as unknown as ExtensionContext;
 
   // Stands in for pi-processes' list handler.
@@ -124,6 +129,37 @@ describe("pi-processes-orca extension", () => {
         lastAssistantMessage: "Started.",
       },
     ]);
+  });
+
+  describe("in Orca native chat", () => {
+    const chatActive = () =>
+      sessionLivenessRegistry().hasActiveProvider({ sessionId: "session_1" });
+
+    beforeEach(() => {
+      vi.stubEnv("ORCA_TERMINAL_HANDLE", "");
+      vi.stubEnv("ORCA_STRUCTURED_SESSION", "1");
+    });
+
+    it("keeps the session alive only while a process lives", () => {
+      const { fire, setProcesses, reports } = setup({ mode: "rpc" });
+      fire("session_start");
+      expect(chatActive()).toBe(false);
+
+      setProcesses([{ status: "running" }]);
+      expect(chatActive()).toBe(true);
+
+      setProcesses([{ status: "exited" }]);
+      expect(chatActive()).toBe(false);
+      expect(reports()).toEqual([]);
+    });
+
+    it("releases the session on shutdown", () => {
+      const { fire, setProcesses } = setup({ mode: "rpc" });
+      fire("session_start");
+      setProcesses([{ status: "running" }]);
+      fire("session_shutdown");
+      expect(chatActive()).toBe(false);
+    });
   });
 
   it("closes the monitoring row when the session shuts down", () => {
