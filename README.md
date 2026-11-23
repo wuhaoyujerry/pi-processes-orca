@@ -9,7 +9,10 @@ pane shows **Monitoring**, not finished. The pane returns to finished when the
 last process ends.
 
 In Orca's native chat, a live process keeps Orca from stopping the idle chat,
-which would also stop the process.
+which would also stop the process. The extension also lists live processes on
+the `orca-background-commands` status line, so Orca builds that include
+[stablyai/orca#47892](https://github.com/stablyai/orca/pull/47892) show the
+chat as **Monitoring**.
 
 It contains only this adapter. It does not include or replace pi-processes.
 

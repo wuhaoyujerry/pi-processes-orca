@@ -20,8 +20,13 @@ function setup(options: { mode?: ExtensionContext["mode"] } = {}) {
       return () => {};
     },
   } as unknown as ExtensionAPI;
+  const statuses: [string, string | undefined][] = [];
   const ctx = {
     mode: options.mode ?? "tui",
+    ui: {
+      setStatus: (key: string, text: string | undefined) =>
+        statuses.push([key, text]),
+    },
     isIdle: () => false,
     sessionManager: {
       getSessionId: () => "session_1",
@@ -40,6 +45,7 @@ function setup(options: { mode?: ExtensionContext["mode"] } = {}) {
 
   return {
     handlers,
+    statuses,
     fire: (event: string, payload: object = {}) =>
       handlers.get(event)?.(payload, ctx),
     setProcesses: (list: unknown) => {
@@ -151,6 +157,32 @@ describe("pi-processes-orca extension", () => {
       setProcesses([{ status: "exited" }]);
       expect(chatActive()).toBe(false);
       expect(reports()).toEqual([]);
+    });
+
+    it("lists live processes on Orca's background-commands status line", () => {
+      const { fire, setProcesses, statuses } = setup({ mode: "rpc" });
+      fire("session_start");
+      expect(statuses).toEqual([]);
+
+      setProcesses([
+        {
+          id: "proc_1",
+          name: "dev",
+          command: "pnpm dev",
+          startTime: 1000,
+          status: "running",
+        },
+        { id: "proc_2", status: "exited" },
+      ]);
+      setProcesses([{ id: "proc_1", status: "exited" }]);
+
+      expect(statuses).toEqual([
+        [
+          "orca-background-commands",
+          '{"commands":[{"id":"proc_1","state":"working","startedAt":1000,"description":"dev: pnpm dev"}]}',
+        ],
+        ["orca-background-commands", '{"commands":[]}'],
+      ]);
     });
 
     it("releases the session on shutdown", () => {
