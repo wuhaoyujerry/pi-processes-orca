@@ -12,19 +12,55 @@ const PROCESSES_CHANGED = "processes:changed";
 const PROCESSES_REQUEST_LIST = "processes:request:list";
 const LIVE_STATUSES = new Set(["running", "terminating", "terminate_timeout"]);
 
-/** Live processes pi-processes reports; 0 when it is not loaded. */
-function countLiveProcesses(events: EventBus): number {
-  let live = 0;
+// Orca native chat shows Monitoring while this status line lists a command.
+const ORCA_BACKGROUND_COMMANDS_KEY = "orca-background-commands";
+
+interface LiveProcess {
+  id?: unknown;
+  name?: unknown;
+  command?: unknown;
+  startTime?: unknown;
+}
+
+/** Live processes pi-processes reports; empty when it is not loaded. */
+function listLiveProcesses(events: EventBus): LiveProcess[] {
+  let live: LiveProcess[] = [];
   events.emit(PROCESSES_REQUEST_LIST, {
     reply: (processes: unknown) => {
       if (!Array.isArray(processes)) return;
-      live = processes.filter((info: { status?: unknown } | null) => {
-        const status = info?.status;
-        return typeof status === "string" && LIVE_STATUSES.has(status);
-      }).length;
+      live = processes.filter(
+        (info: { status?: unknown } | null) =>
+          typeof info?.status === "string" && LIVE_STATUSES.has(info.status),
+      );
     },
   });
   return live;
+}
+
+function countLiveProcesses(events: EventBus): number {
+  return listLiveProcesses(events).length;
+}
+
+/** Status-line text for Orca's background-commands roster. */
+export function backgroundCommandsStatus(processes: LiveProcess[]): string {
+  return JSON.stringify({
+    commands: processes.flatMap((info) => {
+      if (typeof info.id !== "string") return [];
+      const label = [info.name, info.command]
+        .filter((part) => typeof part === "string" && part.length > 0)
+        .join(": ");
+      return [
+        {
+          id: info.id,
+          state: "working",
+          ...(typeof info.startTime === "number"
+            ? { startedAt: info.startTime }
+            : {}),
+          ...(label ? { description: label } : {}),
+        },
+      ];
+    }),
+  });
 }
 
 /** Text of the last assistant message that has any. */
@@ -51,6 +87,7 @@ export default function processesOrcaExtension(pi: ExtensionAPI): void {
   let reporter: OrcaStatusReporter | null = null;
   let unsubscribe: (() => void) | null = null;
   let releaseLiveness: (() => void) | null = null;
+  let clearCommands: (() => void) | null = null;
 
   const stop = (): void => {
     unsubscribe?.();
@@ -59,6 +96,8 @@ export default function processesOrcaExtension(pi: ExtensionAPI): void {
     reporter = null;
     releaseLiveness?.();
     releaseLiveness = null;
+    clearCommands?.();
+    clearCommands = null;
   };
 
   pi.on("session_start", (_event, ctx) => {
@@ -73,6 +112,24 @@ export default function processesOrcaExtension(pi: ExtensionAPI): void {
         sessionFile: ctx.sessionManager.getSessionFile() || undefined,
         isActive: () => countLiveProcesses(pi.events) > 0,
       });
+      let published = JSON.stringify({ commands: [] });
+      const publish = (text: string): void => {
+        if (text === published) return;
+        published = text;
+        try {
+          ctx.ui.setStatus(ORCA_BACKGROUND_COMMANDS_KEY, text);
+        } catch {
+          // A context from a replaced session throws; its roster no longer matters.
+        }
+      };
+      const report = () =>
+        publish(backgroundCommandsStatus(listLiveProcesses(pi.events)));
+      const off = pi.events.on(PROCESSES_CHANGED, report);
+      clearCommands = () => {
+        off();
+        publish(JSON.stringify({ commands: [] }));
+      };
+      report();
     }
     // In RPC and JSON modes stdout is a protocol stream, not a terminal.
     if (!inTerminal || ctx.mode !== "tui") return;
